@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "app": "leantime",
+  "theme": "Northstar Digital product team preparing a checkout reliability launch",
+  "credentials": {
+    "admin": "admin@tester-env.local / TesterEnv123!"
+  },
+  "requirements": {
+    "projects": {
+      "status": "present",
+      "evidence": "Creates active projects Checkout Reliability Launch and Mobile Onboarding Refresh plus archived project Archived Vendor Portal Migration."
+    },
+    "tickets": {
+      "status": "present",
+      "evidence": "Creates 9 tickets across New, Blocked, In Progress, Waiting for Approval, Done, and Archived statuses."
+    },
+    "team": {
+      "status": "present",
+      "evidence": "Creates Maria Chen, Devon Patel, and Ivy Morgan, assigned to seeded projects and tickets."
+    },
+    "planning_artifacts": {
+      "status": "present",
+      "evidence": "Creates 3 sprints, a checkout beta launch milestone, 3 comments, 3 timesheet entries, and 2 notes."
+    }
+  }
+}

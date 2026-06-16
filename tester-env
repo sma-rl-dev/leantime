@@ -1,0 +1,206 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+COMPOSE_FILE="docker-compose.tester-env.yml"
+PROJECT="tester-env-leantime"
+LOCAL_URL="http://localhost:5080"
+BROWSER_URL="http://host.docker.internal:5080/"
+ADMIN_EMAIL="admin@tester-env.local"
+ADMIN_PASSWORD="TesterEnv123!"
+
+# IMAGE_TAG set by scripts/rl-env to a content-addressed tag; manual invocations get :dev
+IMAGE_NAME="${IMAGE_TAG:-tester-env-leantime:dev}"
+CONTAINER_NAME="tester-env-leantime-app"
+DATA_VOLUME="tester-env-leantime-mysql-data"
+
+compose() {
+  (cd "$SCRIPT_DIR" && docker compose -p "$PROJECT" -f "$COMPOSE_FILE" "$@")
+}
+
+mysql_exec() {
+  compose exec -T mysql mysql -uleantime -pleantime leantime "$@"
+}
+
+wait_http() {
+  for _ in $(seq 1 90); do
+    if curl -fsS "$LOCAL_URL/auth/login" >/dev/null || curl -fsS "$LOCAL_URL/install" >/dev/null; then
+      return 0
+    fi
+    sleep 2
+  done
+  echo "Leantime did not become reachable at $LOCAL_URL" >&2
+  return 1
+}
+
+ensure_assets() {
+  compose exec -T app sh -lc 'test -d vendor || composer install --no-dev --no-interaction --prefer-dist'
+  compose exec -T app sh -lc 'test -d node_modules || npm install'
+  compose exec -T app sh -lc 'test -f public/dist/js/compiled-app.3.8.0.min.js || npx mix --production'
+  compose exec -T app sh -lc 'node generateBlocklist.mjs >/dev/null 2>&1 || true'
+  compose exec -T app sh -lc 'chown -R www-data:www-data storage bootstrap/cache userfiles public/userfiles 2>/dev/null || true; chmod -R ug+rwX storage bootstrap/cache userfiles 2>/dev/null || true'
+}
+
+is_installed() {
+  mysql_exec -Nse "SHOW TABLES LIKE 'zp_settings';" 2>/dev/null | grep -q zp_settings
+}
+
+install_app() {
+  if is_installed && [ "$(mysql_exec -Nse "SELECT COUNT(*) FROM zp_user WHERE username='$ADMIN_EMAIL' AND status='A';" 2>/dev/null)" = "1" ]; then
+    return 0
+  fi
+
+  cookie="$(mktemp)"
+  headers="$(mktemp)"
+  trap 'rm -f "$cookie" "$headers"' RETURN
+
+  curl -fsS -c "$cookie" -D "$headers" -o /dev/null \
+    -X POST "$LOCAL_URL/install" \
+    --data-urlencode 'install=1' \
+    --data-urlencode "email=$ADMIN_EMAIL" \
+    --data-urlencode 'firstname=Admin' \
+    --data-urlencode 'lastname=Tester' \
+    --data-urlencode 'company=Northstar Digital'
+
+  invite_path="$(awk 'tolower($1)=="location:" {print $2}' "$headers" | tr -d '\r' | tail -n1)"
+  if [ -z "$invite_path" ] && is_installed; then
+    invite_token="$(mysql_exec -Nse "SELECT pwReset FROM zp_user WHERE username='$ADMIN_EMAIL' LIMIT 1;" 2>/dev/null || true)"
+    if [ -n "$invite_token" ]; then
+      invite_path="/auth/userInvite/$invite_token"
+    fi
+  fi
+  if [ -z "$invite_path" ]; then
+    echo "Install did not return invite redirect" >&2
+    return 1
+  fi
+  if [[ "$invite_path" == http://* || "$invite_path" == https://* ]]; then
+    invite_url="$invite_path"
+  else
+    invite_url="$LOCAL_URL$invite_path"
+  fi
+
+  curl -fsS -b "$cookie" -c "$cookie" -X POST "$invite_url" \
+    --data-urlencode 'saveAccount=1' \
+    --data-urlencode 'step=1' \
+    --data-urlencode 'name=Admin Tester' \
+    --data-urlencode 'jobTitle=QA Admin' \
+    --data-urlencode "password=$ADMIN_PASSWORD" >/dev/null
+  curl -fsS -b "$cookie" -c "$cookie" -X POST "$invite_url?step=2" \
+    --data-urlencode 'step=2' \
+    --data-urlencode 'theme=default' \
+    --data-urlencode 'themeFont=Inter' >/dev/null
+  curl -fsS -b "$cookie" -c "$cookie" -X POST "$invite_url?step=3" \
+    --data-urlencode 'step=3' \
+    --data-urlencode 'colormode=light' \
+    --data-urlencode 'colorscheme=themeDefault' >/dev/null
+  curl -fsS -b "$cookie" -c "$cookie" -X POST "$invite_url?step=4" \
+    --data-urlencode 'step=4' \
+    --data-urlencode 'daySchedule-workStart=09:00' \
+    --data-urlencode 'daySchedule-lunch=12:00' \
+    --data-urlencode 'daySchedule-workEnd=17:00' >/dev/null
+  curl -fsS -b "$cookie" -c "$cookie" -X POST "$invite_url?step=5" \
+    --data-urlencode 'step=5' >/dev/null
+}
+
+seed() {
+  if ! is_installed; then
+    install_app
+  fi
+  mysql_exec < "$SCRIPT_DIR/tester-env-seed.sql"
+}
+
+verify() {
+  is_installed
+  mysql_exec -Nse "
+    SELECT CONCAT('projects=', COUNT(*)) FROM zp_projects WHERE id BETWEEN 100 AND 102;
+    SELECT CONCAT('tickets=', COUNT(*)) FROM zp_tickets WHERE id BETWEEN 100 AND 108;
+    SELECT CONCAT('users=', COUNT(*)) FROM zp_user WHERE id BETWEEN 100 AND 102;
+    SELECT CONCAT('sprints=', COUNT(*)) FROM zp_sprints WHERE id BETWEEN 100 AND 102;
+    SELECT CONCAT('timesheets=', COUNT(*)) FROM zp_timesheets WHERE id BETWEEN 100 AND 102;
+    SELECT CONCAT('comments=', COUNT(*)) FROM zp_comment WHERE id BETWEEN 100 AND 102;
+    SELECT GROUP_CONCAT(CONCAT(headline, ':', status) ORDER BY id SEPARATOR ' | ') FROM zp_tickets WHERE id BETWEEN 101 AND 105;
+  "
+
+  cookie="$(mktemp)"
+  headers="$(mktemp)"
+  page="$(mktemp)"
+  trap 'rm -f "$cookie" "$headers" "$page"' RETURN
+  curl -fsS -c "$cookie" "$LOCAL_URL/auth/login" >/dev/null
+  curl -fsS -b "$cookie" -c "$cookie" -D "$headers" -o /dev/null \
+    -X POST "$LOCAL_URL/auth/login" \
+    --data-urlencode "username=$ADMIN_EMAIL" \
+    --data-urlencode "password=$ADMIN_PASSWORD" \
+    --data-urlencode 'redirectUrl=/dashboard/home'
+  if ! awk 'tolower($1)=="location:" {print $2}' "$headers" | tr -d '\r' | grep -q '/dashboard/home'; then
+    echo "Login did not redirect to dashboard" >&2
+    return 1
+  fi
+  curl -fsS -b "$cookie" -L "$LOCAL_URL/dashboard/home" > "$page"
+  curl -fsS -b "$cookie" -L "$LOCAL_URL/projects/showAll" >> "$page"
+  curl -fsS -b "$cookie" -L "$LOCAL_URL/tickets/showTicket/101" >> "$page"
+  curl -fsS -b "$cookie" -L "$LOCAL_URL/tickets/showTicket/103" >> "$page"
+  curl -fsS -b "$cookie" -L "$LOCAL_URL/tickets/showTicket/105" >> "$page"
+
+  for expected in \
+    'Checkout Reliability Launch' \
+    'Mobile Onboarding Refresh' \
+    'Reconcile duplicate payment webhook events' \
+    'Blocked: tax service timeout fallback' \
+    'Document checkout incident runbook'; do
+    if ! grep -Fq "$expected" "$page"; then
+      echo "Missing visible seeded text in HTTP-rendered pages: $expected" >&2
+      return 1
+    fi
+  done
+  echo "HTTP-visible seeded text verified at $LOCAL_URL (browser URL: $BROWSER_URL)"
+}
+
+case "${1:-help}" in
+  build)
+    compose build app
+    ;;
+  deploy)
+    compose up -d --build
+    wait_http
+    ensure_assets
+    wait_http
+    install_app
+    ;;
+  seed)
+    seed
+    ;;
+  verify)
+    verify
+    ;;
+  reset)
+    compose down -v --remove-orphans
+    ;;
+  stop)
+    compose down --remove-orphans
+    ;;
+  status)
+    compose ps
+    ;;
+  logs)
+    compose logs --tail=200 "${2:-app}"
+    ;;
+  help|*)
+    cat <<EOF
+Usage: ./tester-env <command>
+
+Commands:
+  build   Build the editable-source Leantime app image
+  deploy  Start MySQL/app, install dependencies/assets, and create admin user
+  seed    Load deterministic Northstar Digital project-management data
+  verify  Check stable DB counts and HTTP-rendered seeded UI text
+  reset   Remove app containers and the tester-env-leantime MySQL volume
+  stop    Stop app containers without deleting the database volume
+  status  Show app compose status
+  logs    Show app logs (or pass service name)
+
+Local URL: $LOCAL_URL
+Browser URL: $BROWSER_URL
+Admin: $ADMIN_EMAIL / $ADMIN_PASSWORD
+EOF
+    ;;
+esac
