@@ -8,11 +8,11 @@
   "requirements": {
     "projects": {
       "status": "present",
-      "evidence": "Creates active projects Checkout Reliability Launch and Mobile Onboarding Refresh plus archived project Archived Vendor Portal Migration."
+      "evidence": "Creates active project Checkout Reliability Launch (project id 100) with visible Northstar Digital launch details, plus Mobile Onboarding Refresh and archived project Archived Vendor Portal Migration."
     },
     "tickets": {
       "status": "present",
-      "evidence": "Creates 9 tickets across New, Blocked, In Progress, Waiting for Approval, Done, and Archived statuses."
+      "evidence": "Checkout Reliability Launch includes milestone ticket Milestone: Checkout beta launch (id 100, milestoneid NULL) and visible checkout work assigned to that milestone: Reconcile duplicate payment webhook events, Add receipt resend action to order detail, Blocked: tax service timeout fallback, Verify fulfillment event appears in customer timeline, and Document checkout incident runbook (ticket ids 101-105, milestoneid 100)."
     },
     "team": {
       "status": "present",
@@ -20,7 +20,7 @@
     },
     "planning_artifacts": {
       "status": "present",
-      "evidence": "Creates 3 sprints, a checkout beta launch milestone, 3 comments, 3 timesheet entries, and 2 notes."
+      "evidence": "Creates the checkout beta launch milestone as ticket id 100, assigns checkout work to Sprint 12 - Payment Stabilization and Sprint 13 - Release Readiness, and includes milestone-related comments, timesheet entries, and notes for the launch."
     }
   }
 }
