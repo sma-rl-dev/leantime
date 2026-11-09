@@ -1,20 +1,25 @@
-name: tester-env-leantime
-
+# tester-env deployment overlay (standalone; does not shadow upstream compose).
+# No fixed container_name / network / volume names and no fixed host port, so
+# several RUN_ID-scoped projects can coexist. The tester-env CLI sets the
+# compose project name (-p tester-env-leantime[-$RUN_ID]) and exports PORT,
+# LEAN_APP_URL and IMAGE_NAME. RUN_ID scopes containers/networks/volumes via
+# the project name only; it never scopes the image name (see Image Tag Policy
+# in docs/APP_CLI_PATTERN.md).
 services:
   app:
-    container_name: tester-env-leantime-app
     build:
       context: .dev
       dockerfile: Dockerfile
+    image: "${IMAGE_NAME:-tester-env-leantime:dev}"
     ports:
-      - "5080:8080"
+      - "${PORT:-5080}:8080"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
       - ./:/var/www/html
       - ./.dev/error_reporting.ini:/usr/local/etc/php/conf.d/error_reporting.ini:ro
     environment:
-      LEAN_APP_URL: ""
+      LEAN_APP_URL: "${LEAN_APP_URL:-}"
       LEAN_DB_HOST: mysql
       LEAN_DB_USER: leantime
       LEAN_DB_PASSWORD: leantime
@@ -28,7 +33,6 @@ services:
       - leantime-net
 
   mysql:
-    container_name: tester-env-leantime-mysql
     image: mysql:8.4
     environment:
       MYSQL_ROOT_PASSWORD: leantime
@@ -47,8 +51,6 @@ services:
 
 volumes:
   mysql-data:
-    name: tester-env-leantime-mysql-data
 
 networks:
   leantime-net:
-    name: tester-env-leantime-net

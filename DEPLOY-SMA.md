@@ -9,10 +9,17 @@
 ./tester-env reset     # Clean slate (stop containers, remove volume)
 ```
 
+All commands accept `--run-id <id>` and `--port <port>` (scripts/rl-env
+always passes both); the same values can be exported as `RUN_ID` / `PORT`
+for manual runs. The flags win when both are given.
+
 ## URLs
 
-- Local: `http://localhost:5080`
-- Browser (MCP): `http://host.docker.internal:5080/`
+- Local: `http://localhost:5080` (or `http://localhost:$PORT` with a custom port)
+- Browser (MCP): `http://host.docker.internal:5080/` for manual runs;
+  scripts/rl-env sets `TESTER_ENV_BROWSER_ORIGIN` and the app's absolute base
+  URL (`LEAN_APP_URL`) defaults to it so redirects and links stay reachable
+  from the runner browser. Export `LEAN_APP_URL` explicitly to override.
 
 ## Credentials
 
@@ -21,8 +28,15 @@
 ## Architecture
 
 - **App**: PHP 8.2 Apache, editable source mounted at `/var/www/html`
-- **Database**: MySQL 8.4 with named volume `tester-env-leantime-mysql-data`
-- **Port**: 5080
+- **Database**: MySQL 8.4 with a compose-project-scoped named volume
+  (`tester-env-leantime[-$RUN_ID]_mysql-data`)
+- **Port**: 5080 by default, honoured from `--port` / `PORT`
+  (scripts/rl-env uses `--port auto`)
+- **Isolation**: compose project `tester-env-leantime[-$RUN_ID]` scopes
+  containers, network and volumes per run; the image tag (`IMAGE_TAG`,
+  default `tester-env-leantime:dev`) is shared and never RUN_ID-scoped
+- **Base URL**: `LEAN_APP_URL` defaults to `TESTER_ENV_BROWSER_ORIGIN`,
+  else `http://localhost:$PORT` for manual runs
 
 ## Build
 
@@ -62,4 +76,8 @@ Fork: `https://github.com/Smartesting/leantime`, branch `tester-env-baseline`
 
 ## Reset Path
 
-`./tester-env reset` runs `docker compose -p tester-env-leantime down -v` — removes containers and the `tester-env-leantime-mysql-data` named volume. Re-deploy with `./tester-env deploy` completes full cycle in <2 min with cached image.
+`./tester-env reset` (optionally scoped with `--run-id <id>`) runs
+`docker compose -p tester-env-leantime[-$RUN_ID] down -v` — removes only that
+run's containers and its project-scoped MySQL volume, never the image.
+Re-deploy with `./tester-env deploy` completes full cycle in <2 min with
+cached image. Shared-image cleanup: `scripts/rl-env gc --prune-images`.

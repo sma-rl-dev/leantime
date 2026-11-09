@@ -1,18 +1,105 @@
 #!/usr/bin/env bash
+# tester-env CLI for the Leantime fork deployment overlay (fork root).
+#
+# Image policy: IMAGE_TAG is exported by scripts/rl-env as a
+# content-addressed tag so identical (baseline, patch-set) combos share an
+# image. Manual invocations default to tester-env-leantime:dev. RUN_ID scopes
+# ONLY containers/volumes/networks (via the compose project name), never the
+# image name.
+#
+# Usage: ./tester-env <command> [--run-id <id>] [--port <port>]
+# Commands: build, deploy, seed, verify, reset, stop, status, logs, help
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 COMPOSE_FILE="docker-compose.tester-env.yml"
-PROJECT="tester-env-leantime"
-LOCAL_URL="http://localhost:5080"
-BROWSER_URL="http://host.docker.internal:5080/"
+
+RUN_ID="${RUN_ID:-default}"
+PORT="${PORT:-5080}"
 ADMIN_EMAIL="admin@tester-env.local"
 ADMIN_PASSWORD="TesterEnv123!"
 
-# IMAGE_TAG set by scripts/rl-env to a content-addressed tag; manual invocations get :dev
-IMAGE_NAME="${IMAGE_TAG:-tester-env-leantime:dev}"
-CONTAINER_NAME="tester-env-leantime-app"
-DATA_VOLUME="tester-env-leantime-mysql-data"
+usage() {
+  cat <<EOF
+Leantime - Tester Environment CLI
+
+Usage: ./tester-env <command> [--run-id <id>] [--port <port>]
+
+Commands:
+  build    Build the editable-source Leantime app image
+  deploy   Start MySQL/app, install dependencies/assets, and create admin user
+  seed     Load deterministic Northstar Digital project-management data
+  verify   Check stable DB counts and HTTP-rendered seeded UI text
+  reset    Remove this run's containers and MySQL volume (image kept)
+  stop     Stop this run's containers without deleting the database volume
+  status   Show this run's compose status
+  logs     Show app logs (or pass service name)
+  help     Show this help message
+
+Options:
+  --run-id <id>   Isolate containers, network and volume names for parallel runs.
+                  Default: default (no suffix). scripts/rl-env always passes one.
+  --port <port>   Host port to bind the app container to. Default: 5080
+                  (or \$PORT when exported; scripts/rl-env sets both).
+
+Env vars:
+  PORT                     Host port (default 5080). The --port flag wins when
+                           both are given.
+  RUN_ID                   Run id scoping compose project/containers/network/
+                           volume names only, never the image name.
+  IMAGE_TAG                Image name/tag (default tester-env-leantime:dev; set
+                           by scripts/rl-env to a content-addressed tag).
+  TESTER_ENV_BROWSER_ORIGIN
+                           Browser-visible origin (set by scripts/rl-env). The
+                           app's absolute base URL defaults to it so redirects
+                           and links stay reachable from the runner browser.
+  LEAN_APP_URL             Override the app's absolute base URL (default: the
+                           browser origin above, else http://localhost:\$PORT
+                           for manual runs).
+
+Local URL: http://localhost:${PORT}
+Browser URL: ${TESTER_ENV_BROWSER_ORIGIN:-http://host.docker.internal:${PORT}/}
+Admin: ${ADMIN_EMAIL} / ${ADMIN_PASSWORD}
+EOF
+}
+
+REMAINING_ARGS=()
+
+parse_flags() {
+  REMAINING_ARGS=()
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --run-id)
+        RUN_ID="${2:?--run-id requires a value}"; shift 2 ;;
+      --port)
+        PORT="${2:?--port requires a value}"; shift 2 ;;
+      --help|-h)
+        usage; exit 0 ;;
+      --*)
+        echo "Unknown option: $1" >&2; usage; exit 2 ;;
+      *)
+        REMAINING_ARGS+=("$1"); shift ;;
+    esac
+  done
+}
+
+refresh_names() {
+  local suffix=""
+  if [[ -n "${RUN_ID}" && "${RUN_ID}" != "default" ]]; then
+    suffix="-${RUN_ID}"
+  fi
+  PROJECT="tester-env-leantime${suffix}"
+  # IMAGE_TAG set by scripts/rl-env to a content-addressed tag; manual invocations get :dev
+  IMAGE_NAME="${IMAGE_TAG:-tester-env-leantime:dev}"
+  LOCAL_URL="http://localhost:${PORT}"
+  # Browser-Origin Contract: Leantime builds absolute URLs from LEAN_APP_URL.
+  # Default it to the runner-visible origin so redirects/links stay on the
+  # browser origin; manual runs fall back to http://localhost:$PORT.
+  # Never override an explicitly exported LEAN_APP_URL.
+  LEAN_APP_URL="${LEAN_APP_URL:-${TESTER_ENV_BROWSER_ORIGIN:-http://localhost:${PORT}}}"
+  BROWSER_URL="${TESTER_ENV_BROWSER_ORIGIN:-http://host.docker.internal:${PORT}/}"
+  export IMAGE_NAME PORT LEAN_APP_URL
+}
 
 compose() {
   (cd "$SCRIPT_DIR" && docker compose -p "$PROJECT" -f "$COMPOSE_FILE" "$@")
@@ -155,16 +242,53 @@ verify() {
   echo "HTTP-visible seeded text verified at $LOCAL_URL (browser URL: $BROWSER_URL)"
 }
 
-case "${1:-help}" in
+cmd_deploy() {
+  echo "==> Building image ${IMAGE_NAME} and starting stack for project '${PROJECT}' on host port ${PORT}"
+  compose up -d --build
+  wait_http
+  ensure_assets
+  wait_http
+  install_app
+  echo "==> Deployment complete. Local: $LOCAL_URL Browser: $BROWSER_URL"
+}
+
+cmd_reset() {
+  echo "==> Removing containers and volumes for project '${PROJECT}' only (image kept)"
+  compose down -v --remove-orphans
+  echo "Clean slate. Run './tester-env deploy' to start fresh."
+}
+
+cmd_stop() {
+  echo "==> Stopping containers for project '${PROJECT}' (volumes preserved)"
+  compose stop
+  echo "Stopped."
+}
+
+cmd_status() {
+  compose ps
+  echo "URL: $LOCAL_URL"
+}
+
+cmd_logs() {
+  compose logs --tail=200 "$@"
+}
+
+CMD="${1:-help}"
+shift || true
+parse_flags "$@"
+if [[ ${#REMAINING_ARGS[@]} -gt 0 ]]; then
+  set -- "${REMAINING_ARGS[@]}"
+else
+  set --
+fi
+refresh_names
+
+case "${CMD}" in
   build)
     compose build app
     ;;
   deploy)
-    compose up -d --build
-    wait_http
-    ensure_assets
-    wait_http
-    install_app
+    cmd_deploy
     ;;
   seed)
     seed
@@ -173,34 +297,18 @@ case "${1:-help}" in
     verify
     ;;
   reset)
-    compose down -v --remove-orphans
+    cmd_reset
     ;;
   stop)
-    compose down --remove-orphans
+    cmd_stop
     ;;
   status)
-    compose ps
+    cmd_status
     ;;
   logs)
-    compose logs --tail=200 "${2:-app}"
+    cmd_logs "${1:-app}"
     ;;
-  help|*)
-    cat <<EOF
-Usage: ./tester-env <command>
-
-Commands:
-  build   Build the editable-source Leantime app image
-  deploy  Start MySQL/app, install dependencies/assets, and create admin user
-  seed    Load deterministic Northstar Digital project-management data
-  verify  Check stable DB counts and HTTP-rendered seeded UI text
-  reset   Remove app containers and the tester-env-leantime MySQL volume
-  stop    Stop app containers without deleting the database volume
-  status  Show app compose status
-  logs    Show app logs (or pass service name)
-
-Local URL: $LOCAL_URL
-Browser URL: $BROWSER_URL
-Admin: $ADMIN_EMAIL / $ADMIN_PASSWORD
-EOF
+  help|--help|-h|*)
+    usage
     ;;
 esac
