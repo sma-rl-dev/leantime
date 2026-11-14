@@ -12,7 +12,7 @@
     },
     "tickets": {
       "status": "present",
-      "evidence": "Checkout Reliability Launch includes milestone ticket Milestone: Checkout beta launch (id 100, milestoneid NULL) and visible checkout work assigned to that milestone: Reconcile duplicate payment webhook events, Add receipt resend action to order detail, Blocked: tax service timeout fallback, Verify fulfillment event appears in customer timeline, and Document checkout incident runbook (ticket ids 101-105, milestoneid 100)."
+      "evidence": "Checkout Reliability Launch includes milestone ticket Milestone: Checkout beta launch (id 100, milestoneid NULL) and visible checkout work assigned to that milestone: Reconcile duplicate payment webhook events, Add receipt resend action to order detail, Blocked: tax service timeout fallback, Verify fulfillment event appears in customer timeline, and Document checkout incident runbook (ticket ids 101-105, milestoneid 100). It also includes ordinary no-milestone ticket Audit expired-card error copy (id 109, type task, milestoneid NULL) so the Not assigned to a milestone filter lists exactly that ticket."
     },
     "team": {
       "status": "present",
@@ -20,7 +20,11 @@
     },
     "planning_artifacts": {
       "status": "present",
-      "evidence": "Creates the checkout beta launch milestone as ticket id 100, assigns checkout work to Sprint 12 - Payment Stabilization and Sprint 13 - Release Readiness, and includes milestone-related comments, timesheet entries, and notes for the launch."
+      "evidence": "Creates the checkout beta launch milestone as ticket id 100, assigns checkout work to Sprint 12 - Payment Stabilization, Sprint 13 - Release Readiness, and Sprint 4 - Guided Setup, and includes milestone-related comments, timesheet entries, and notes for the launch."
+    },
+    "onboarding": {
+      "status": "present",
+      "evidence": "Sets zp_settings companysettings.completedOnboarding and user.1.firstLoginCompleted to true so the first-run Welcome to Leantime task modal no longer opens after admin login."
     }
   }
 }

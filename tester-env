@@ -200,18 +200,21 @@ verify() {
   is_installed
   mysql_exec -Nse "
     SELECT CONCAT('projects=', COUNT(*)) FROM zp_projects WHERE id BETWEEN 100 AND 102;
-    SELECT CONCAT('tickets=', COUNT(*)) FROM zp_tickets WHERE id BETWEEN 100 AND 108;
+    SELECT CONCAT('tickets=', COUNT(*)) FROM zp_tickets WHERE id BETWEEN 100 AND 109;
     SELECT CONCAT('users=', COUNT(*)) FROM zp_user WHERE id BETWEEN 100 AND 102;
     SELECT CONCAT('sprints=', COUNT(*)) FROM zp_sprints WHERE id BETWEEN 100 AND 102;
     SELECT CONCAT('timesheets=', COUNT(*)) FROM zp_timesheets WHERE id BETWEEN 100 AND 102;
     SELECT CONCAT('comments=', COUNT(*)) FROM zp_comment WHERE id BETWEEN 100 AND 102;
+    SELECT CONCAT('no_milestone_tickets=', COUNT(*)) FROM zp_tickets WHERE projectId=100 AND type<>'milestone' AND (milestoneid IS NULL OR milestoneid=0);
+    SELECT CONCAT('onboarding_settings=', COUNT(*)) FROM zp_settings WHERE \`key\` IN ('companysettings.completedOnboarding', 'user.1.firstLoginCompleted') AND \`value\`='true';
     SELECT GROUP_CONCAT(CONCAT(headline, ':', status) ORDER BY id SEPARATOR ' | ') FROM zp_tickets WHERE id BETWEEN 101 AND 105;
   "
 
   cookie="$(mktemp)"
   headers="$(mktemp)"
   page="$(mktemp)"
-  trap 'rm -f "$cookie" "$headers" "$page"' RETURN
+  filtered="$(mktemp)"
+  trap 'rm -f "$cookie" "$headers" "$page" "$filtered"' RETURN
   curl -fsS -c "$cookie" "$LOCAL_URL/auth/login" >/dev/null
   curl -fsS -b "$cookie" -c "$cookie" -D "$headers" -o /dev/null \
     -X POST "$LOCAL_URL/auth/login" \
@@ -227,18 +230,37 @@ verify() {
   curl -fsS -b "$cookie" -L "$LOCAL_URL/tickets/showTicket/101" >> "$page"
   curl -fsS -b "$cookie" -L "$LOCAL_URL/tickets/showTicket/103" >> "$page"
   curl -fsS -b "$cookie" -L "$LOCAL_URL/tickets/showTicket/105" >> "$page"
+  curl -fsS -b "$cookie" -L "$LOCAL_URL/tickets/showAll?projectId=100&milestone=0" > "$filtered"
 
   for expected in \
     'Checkout Reliability Launch' \
     'Mobile Onboarding Refresh' \
     'Reconcile duplicate payment webhook events' \
     'Blocked: tax service timeout fallback' \
-    'Document checkout incident runbook'; do
+    'Document checkout incident runbook' \
+    'Audit expired-card error copy'; do
     if ! grep -Fq "$expected" "$page"; then
       echo "Missing visible seeded text in HTTP-rendered pages: $expected" >&2
       return 1
     fi
   done
+
+  if ! grep -Fq 'Audit expired-card error copy' "$filtered"; then
+    echo "Not-assigned milestone filter does not list the seeded no-milestone ticket" >&2
+    return 1
+  fi
+  if grep -Fq 'Reconcile duplicate payment webhook events' "$filtered"; then
+    echo "Not-assigned milestone filter still lists a milestone-assigned ticket" >&2
+    return 1
+  fi
+  if grep -Fq 'helperController.firstLoginModal()' "$page"; then
+    echo "First-run onboarding task modal still renders after seed" >&2
+    return 1
+  fi
+  if grep -Fq "showHelperModal('home'" "$page"; then
+    echo "Dashboard onboarding tour modal still renders after seed" >&2
+    return 1
+  fi
   echo "HTTP-visible seeded text verified at $LOCAL_URL (browser URL: $BROWSER_URL)"
 }
 

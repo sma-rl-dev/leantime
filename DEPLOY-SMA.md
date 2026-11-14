@@ -50,7 +50,7 @@ Cold build ~10 min, image size ~3 GB.
 
 ## Seed Data (Northstar Digital)
 
-3 projects, 9 tickets/tasks across New/Blocked/In Progress/Waiting/Done/Archived, 3 users, 3 sprints, 3 comments, 3 timesheets, 2 notes.
+3 projects, 10 tickets/tasks across New/Blocked/In Progress/Waiting/Done/Archived, 3 users, 3 sprints, 3 comments, 3 timesheets, 2 notes.
 
 Stable visible names:
 - Checkout Reliability Launch
@@ -58,6 +58,10 @@ Stable visible names:
 - Reconcile duplicate payment webhook events
 - Blocked: tax service timeout fallback
 - Document checkout incident runbook
+- Audit expired-card error copy (ordinary ticket with no milestone)
+
+`seed` also marks the admin's first-run onboarding as completed, so the
+"Welcome to Leantime" task-creation modal does not open after login.
 
 ## Browser Evidence
 
